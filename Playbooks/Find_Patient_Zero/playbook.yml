@@ -1,0 +1,50 @@
+---
+- name: Find Patient Zero
+  hosts: all
+  ignore_errors: true
+
+  tasks:
+  - name: Get MAC for a given IP Address 
+    picos_config: mode='cli_show' cmd='show arp | match {{IPAddr}} '
+    register: arphunt_result
+  - set_fact:
+      deviceip: "{{ arphunt_result.stdout | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', '\\1') | first }}"
+      devicemac: "{{ vxlanarp_result.stdout | regex_search('((?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2})', '\\1') | first }}"
+  - debug:
+       msg: "'Hunting for MAC Address with IP: {{ deviceip }} ' +  ' with MAC Address: {{ devicemac }} '"
+
+  - name: Show execution result
+    debug: var=arphunt_result.stdout_lines
+  - name: Get MAC for a given IP Address check VXLANs 
+    picos_config: mode='cli_show' cmd='show vxlan arp | match {{IPAddr}} '
+    register: vxlanarp_result
+  - name: Show execution result
+    debug: var=vxlanarp_result.stdout_lines
+  - set_fact:
+      deviceip: "{{ vxlanarp_result.stdout | regex_search('(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', '\\1') | first }}"
+      devicemac: "{{ vxlanarp_result.stdout | regex_search('((?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2})', '\\1') | first }}"
+  - debug:
+      msg: "'Hunting for MAC Address with IP: {{ deviceip }} ' +  ' with MAC Address: {{ devicemac }} '"
+
+
+  - name: Get Device Port for a given MAC Address check VXLANs 
+    picos_config: mode='cli_show' cmd='show vxlan address-table | match {{MacAddr}} '
+    register: vxlanmac_result
+  - set_fact:
+      deviceport: "{{ vxlanmac_result.stdout | regex_search('(ge-1/1/\\d*)', '\\1') | first }}"
+      devicename: "{{ vxlanmac_result.stdout | regex_search('(@(.*)>)', '\\2') | first }}"
+  - debug:
+       msg: "Found the Device on port: {{ deviceport }} on {{ devicename }} "
+  - set_fact:
+      devicename: "{{ vxlanmac_result.stdout | regex_search('(@(.*)>)', '\\2') | first }}"
+  - debug:
+       msg: "Found the Device on: {{ devicename }} "
+  - name: Show vxlanmac_execution result
+    debug: var=vxlanmac_result.stdout_lines
+  - name: Get switch port for a given Mac Address 
+    picos_config: mode='cli_show' cmd='show mac-address table | match {{MacAddr}} '
+    register: mactab_result
+  - set_fact:
+      deviceport: "{{ mactab_result.stdout | regex_search('(ge-1/1/\\d*)', '\\1') | first }}"
+  - debug:
+       msg: "Found the Device on port: {{ deviceport }} "

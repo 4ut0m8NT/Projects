@@ -1,0 +1,13 @@
+---
+- name:  Backup all configs locally on the device
+  hosts: all
+  tasks:
+  - name: Enter config mode
+    picos_config: mode='cli_config' cmd='save {{ ansible_hostname }}_{{ ansible_date_time.date }}.conf'
+    register: exec_result
+    contents: "{{ lookup('file', {{ ansible_hostname }}_{{ ansible_date_time.date }}.conf) }}"
+  - name: Saved Configuration
+    register: exec_results.stdout_lines
+    debug: msg=" this the file: {{ contents }}"
+    
+    

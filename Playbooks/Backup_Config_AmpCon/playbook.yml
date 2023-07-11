@@ -1,0 +1,17 @@
+---
+- name:  Backup all configs locally on the device
+  hosts: all
+  tasks:
+  - name: Enter config mode
+    picos_config: mode='cli_show' cmd='show running-config | display set | no-more'
+    register: config
+
+  - name: Saved Configuration
+    debug: var=config.stdout_lines
+    register: config.stdout_lines
+      
+  - name: Save output to local directory
+    copy:
+      content: "{{ config.stdout | replace('\\n', '\n') }}"
+      dest: "/home/admin/{{ ansible_hostname }}_{{ ansible_date_time.date }}_set.conf"
+    delegate_to: localhost

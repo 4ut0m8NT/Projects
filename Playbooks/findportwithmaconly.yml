@@ -1,0 +1,10 @@
+---
+- name:  Get a switch port for a given Mac Address
+  hosts: all
+  tasks:
+  - name: Get switch port for a given Mac Address showing only the mac
+    picos_config: mode='cli_show' cmd='show mac-address table | match {{MacAddr}} '
+    register: exec_result
+  - name: Show execution result
+    debug: var=exec_result.stdout_lines.ansible_default_ipv4.macaddress
+    

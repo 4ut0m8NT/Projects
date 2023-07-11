@@ -1,0 +1,55 @@
+---
+- name:  BACKUP LAB AND RESET LAB TO "Golden Config"
+  hosts: all
+  vars:
+    savedfile: '{{ ansible_hostname }}_{{ ansible_date_time.date }}_{{custombackup_tag}}_RESTORE.conf'
+  
+  tasks:
+  - name: Enter config mode - save config
+    picos_config: mode='cli_config' cmd='save {{ ansible_hostname }}_{{ ansible_date_time.date }}_{{custombackup_tag}}_RESTORE.conf'
+    register: exec_result
+  - name: Saved Configuration
+    shell: cat {{ savedfile }}
+    register: savedfile_contents
+
+  - name: Creates directory
+    file:
+        path: "/home/admin/Config_Backups/{{custombackup_tag}}"
+        state: directory
+    delegate_to: localhost
+
+  - name: Save output to ampcon directory
+    copy:
+      content: "{{ savedfile_contents.stdout | replace('\\n', '\n') }}"
+      dest: "/home/admin/Config_Backups/{{custombackup_tag}}/{{ ansible_hostname }}_{{ ansible_date_time.date }}_{{custombackup_tag}}_RESTORE.conf"
+    delegate_to: localhost
+
+
+  - name: Enter config mode - running config
+    picos_config: mode='cli_show' cmd='show running-config | display set | no-more'
+    register: config
+
+  - name: Saved Configuration
+    debug: var=config.stdout_lines
+    register: config.stdout_lines
+    
+  - name: Save SET output to ampcon directory
+    copy:
+      content: "{{ config.stdout | replace('\\n', '\n') }}"
+      dest: "/home/admin/Config_Backups/{{custombackup_tag}}/{{ ansible_hostname }}_{{ ansible_date_time.date }}_{{custombackup_tag}}_SET.conf"
+    delegate_to: localhost
+
+  - name: Zip up configs
+    archive:
+      path:
+        - "/home/admin/Config_Backups/{{custombackup_tag}}"
+      dest: "/home/admin/Config_Backups/{{ custombackup_tag }}/{{ custombackup_tag }}_Lab_configs_{{ ansible_date_time.date }}.zip"
+      format: zip
+    delegate_to: localhost
+
+  - name: Enter config mode
+    picos_config: mode='cli_config' cmd='rollback default;commit;load override {{ ansible_hostname }}_{{ backup_date }}_{{customrestore_tag}}_RESTORE.conf;commit;run request system reboot'
+    register: exec_result
+  - name: Saved Configuration
+    debug: var=exec_result.stdout_lines
+    register: exec_results.stdout_lines

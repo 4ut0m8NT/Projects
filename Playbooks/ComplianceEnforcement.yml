@@ -1,0 +1,20 @@
+---
+- name:  Check the Security Compliance (NAC) and enforce policy if needed
+  hosts: all
+  tasks:
+  - name: Show whether Dot1x is enabled on all interfaces
+    picos_config: mode='cli_show' cmd='show dot1x interface'
+    register: exec_result
+  - name: Compliance check on the NAC
+    debug: var=exec_result.stdout_lines
+  - name: Show interfaces in which Dot1X (NAC) is disabled
+    set_fact:
+        i_list: "{{ exec_result.stdout |  regex_findall('\\n([\\S]+) +disable', ignorecase=True) }}"
+  - name: Loop through the interfaces that failed the Compliance Test and enable Dot1x
+    picos_config: mode='cli_config' cmd='set protocols dot1x interface {{ item }} auth-mode 802.1x'
+    loop: "{{ i_list }}"
+  - name: Verify whether Dot1x is now enabled on all interfaces
+    picos_config: mode='cli_show' cmd='show dot1x interface'
+    register: exec_results
+  - name: NAC status on all ports after enforcing the NAC policy
+    debug: var=exec_results.stdout_lines

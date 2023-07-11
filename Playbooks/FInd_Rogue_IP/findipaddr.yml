@@ -1,0 +1,24 @@
+---
+- name:  Get a MAC for a given IP
+  hosts: all
+  tasks:
+  - name: Get MAC for a given IP Address 
+    picos_config: mode='cli_show' cmd='show arp | match {{IPAddr}} '
+    register: exec_result
+  - name: Show execution result
+    debug: var=exec_result.stdout_lines
+  - name: Get MAC for a given IP Address check VXLANs 
+    picos_config: mode='cli_show' cmd='show vxlan arp | match {{IPAddr}} '
+    register: vxlanarp_result
+  - name: Show execution result
+    debug: var=vxlanarp_result.stdout_lines
+  - name: Get MAC for a given IP Address check VXLANs 
+    picos_config: mode='cli_show' cmd='show vxlan address-table | match {{IPAddr}} '
+    register: vxlanmac_result
+  - name: Show execution result
+    debug: var=vxlanmac_result.stdout_lines
+  - name: Get MAC for a given IP Address check VXLANs 
+    picos_config: mode='cli_show' cmd='show mac-address table | match {{IPAddr}} '
+    register: mactab_result
+  - name: Show execution result
+    debug: var=mactab_result.stdout_lines    

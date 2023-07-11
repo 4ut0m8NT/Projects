@@ -1,0 +1,8 @@
+---
+- name:  Rename Switches
+  hosts: all
+    
+  tasks:
+  - name: Enter config mode - rename it
+    picos_config: mode='cli_config' cmd='set system hostname {{ hostname }}'
+    register: exec_result

@@ -1,0 +1,19 @@
+---
+- name:  Backup all configs locally on the device
+  hosts: all
+  vars:
+    savedfile: '{{ ansible_hostname }}_{{ ansible_date_time.date }}.conf'
+    
+  tasks:
+  - name: Enter config mode
+    picos_config: mode='cli_config' cmd='save {{ ansible_hostname }}_{{ ansible_date_time.date }}.conf'
+    register: exec_result
+  - name: Saved Configuration
+    shell: cat {{ savedfile }}
+    register: savedfile_contents
+
+  - name: Save output to local directory
+    copy:
+      content: "{{ savedfile_contents.stdout | replace('\\n', '\n') }}"
+      dest: "/home/admin/{{ ansible_hostname }}_{{ ansible_date_time.date }}_RESTORE.conf"
+    delegate_to: localhost
