@@ -1,3 +1,13 @@
+### AUTHOR: Neal Trieber
+#####################################################
+# * PRELIMINARY STEPS / PREP * ######################
+#####################################################
+# STEP 1) pip install -r requirements.txt --> included in repo!
+# STEP 2) ENJOY!
+##########***********************************************
+# NOTES: *      - USES STREAMLIT as a UI  
+#        *      - USES Deepset/Haystack For NLP Pipelining
+##########***********************************************
 from github import Github
 import git
 import re
@@ -375,9 +385,9 @@ local_css("gitAnswers.css")
 remote_css('https://fonts.googleapis.com/icon?family=Material+Icons')
 
 # Adjust to a question that you would like users to see in the search bar when they load the UI:
-DEFAULT_QUESTION_AT_STARTUP = ''
+DEFAULT_QUESTION_AT_STARTUP = ""
 image = "githubleaks.jpeg"
-caption = "RE-SEARCH. RE-DISCOVERED"
+caption = "RE-SEARCH. RE-DISCOVERED."
 sidebarimage = "githubleaks.jpeg"
 
 
