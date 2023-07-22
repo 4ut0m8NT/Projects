@@ -9,6 +9,7 @@ from haystack.schema import Answer
 from haystack.nodes import TextConverter
 from haystack.nodes import PDFToTextConverter
 from haystack.nodes import DocxToTextConverter
+from haystack.nodes import PromptNode, PromptTemplate, AnswerParser
 #Use this file to set up your Haystack pipeline and querying
 from haystack.nodes import BM25Retriever, EmbeddingRetriever, FARMReader
 from haystack.pipelines import DocumentSearchPipeline
@@ -126,7 +127,24 @@ def start_haystack(_ds, question, answers):
     # print ("***************************************************************************")
     # answers = print_answers(prediction, details="all")
     print ("***************************************************************************")
-    # for answer in answers:
+    lfqa_prompt = PromptTemplate(
+    prompt="""Synthesize a comprehensive answer from the following text for the given question.
+                             Provide a clear and concise response that summarizes the key points and information presented in the text.
+                             Your answer should be in your own words and be no longer than 50 words.
+                             \n\n Related text: {join(documents)} \n\n Question: {query} \n\n Answer:""",
+    output_parser=AnswerParser(),)
+
+    prompt_node = PromptNode(model_name_or_path="google/flan-t5-large", default_prompt_template=lfqa_prompt)
+    
+    pipe = Pipeline()
+    pipe.add_node(component=embedding_retriever, name="retriever", inputs=["Query"])
+    pipe.add_node(component=prompt_node, name="prompt_node", inputs=["retriever"])
+    output = pipe.run(query=question)
+    print ("Here's What prompted me:")
+    for prompt in output["answers"]:
+        print ("Answer: " + prompt.answer)
+        print ("*************************************************************")
+        # for answer in answers:
     #     print ("The Answer: " + answer)
     # #Use this function to contruct a pipeline
     # pipeline = Pipeline()
@@ -177,13 +195,13 @@ def start_haystack(_ds, question, answers):
 def query(question):
     print("Received question: " + str(question))
     params = {}
-    answers = ''
-    answers = start_haystack(document_store, question, answers)
+    answersset1 = ''
+    answersset1 = start_haystack(document_store, question, answers)
     print ("Here's what we found out: ")
     print ("***************************************************************************")
-    for i in range(len(answers)):
-        print (answers[i])
+    for i in range(len(answersset1)):
+        print (answersset1[i])
     
     # for key, value in results.items():
     #         print (key, ': ', value)
-    return answers
+    return answersset1
