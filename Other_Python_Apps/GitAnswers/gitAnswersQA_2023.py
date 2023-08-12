@@ -442,7 +442,7 @@ def chunk_text(df, width=1500, overlap=500):
 def search(query, n_results, df, search_index, co):
     # Get the query's embedding
     query_embed = co.embed(texts=[query],
-                    model="f4977328-3655-413c-82ef-3520da58852f-ft",
+                    model="large",
                     truncate="LEFT").embeddings
     
     # Get the nearest neighbors and similarity score for the query and the embeddings, 
@@ -462,7 +462,7 @@ def search(query, n_results, df, search_index, co):
 # define a function to generate an answer
 def gen_answer(q, para): 
     response = co.generate( 
-        model='command-xlarge-20221108', 
+        model='command', 
         prompt=f'''Paragraph:{para}\n\n
                 Answer the question using this paragraph.\n\n
                 Question: {q}\nAnswer:''', 
@@ -472,7 +472,7 @@ def gen_answer(q, para):
 
 def gen_better_answer(ques, ans): 
     response = co.generate( 
-        model='command-xlarge-20221108', 
+        model='command', 
         prompt=f'''Answers:{ans}\n\n
                 Question: {ques}\n\n
                 Generate a new answer that uses the best answers 
@@ -504,16 +504,16 @@ def display(query, results):
     # display the results
     for i, row in results.iterrows():
         # display the 'Category' outlined
-        st.markdown(f'**{row["Type"]}**')
-        st.markdown(f'**{row["Category"]}**')
-        st.markdown(f'{row["title"]}')
-        # display the url as a hyperlink
-        # add a button to open the url in a new tab
-        st.markdown(f'[{row["link"]}]({row["link"]})')
+        # st.markdown(f'**{row["Type"]}**')
+        # st.markdown(f'**{row["Category"]}**')
+        # st.markdown(f'{row["title"]}')
+        # # display the url as a hyperlink
+        # # add a button to open the url in a new tab
+        # st.markdown(f'[{row["link"]}]({row["link"]})')
         st.write(row['answer'])
         # collapse the text
         with st.expander('Read more'):
-            st.write(row['text'])
+            st.write(row['Text'])
         st.write('')
 
 
