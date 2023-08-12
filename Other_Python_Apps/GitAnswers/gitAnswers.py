@@ -1291,7 +1291,7 @@ if authenticate(username, password, loggedin):
         gitanswersapikey = gitanswersinfoexpander.text_input(
             "gitanswers API Key for accessing gitanswers:", value="AAAQAAAAA3XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXMYHI2TTJBCXIMKUME======", type='password')
         # hardcoding API-Key for simplicity can be uncommented above for dynamic form-access
-        #gitanswersapikey = "AAAQAAAAAL2STGRVHM5UFVMY3OBWENDI2AWUGYKLN5VFMULINRYQ===="
+        
     col1.write("****************************************************")
     githubinfoexpander = col1.expander("GitHub Search Criteria:")
     with githubinfoexpander:
