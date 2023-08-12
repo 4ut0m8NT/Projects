@@ -14,13 +14,17 @@ import re
 import html2text
 import requests
 import sys
+from annoy import AnnoyIndex
+from concurrent.futures import ThreadPoolExecutor
 import os, shutil
 import os.path
 import sqlite3
+import csv
 import sqlalchemy
 import glob
 import tabulate
 import io
+from io import StringIO as StringIO
 from lxml import etree
 from pathlib import Path
 import boto3
@@ -37,7 +41,7 @@ import re
 import hashlib
 import os
 from annotated_text import annotation
-# from json import JSONDecodeError
+from json import JSONDecodeError
 import logging
 from markdown import markdown
 import markdown
@@ -49,7 +53,9 @@ from utils.ui import reset_results, set_initial_state
 import json
 import os
 import sys
-
+import cohere
+co = cohere.Client('GoXqyC9GZpFg3jU3gYRTTgf1nEImN65JGDAgPd0H') # This is your trial API key
+# print('Summary:', cohere_response.summary)
 import pandas as pd
 # import streamlit as st
 from annotated_text import annotated_text
@@ -62,7 +68,9 @@ from streamlit.web.server import Server
 # from streamlit.scriptrunner.script_run_context
 import time
 import random
+import numpy as np
 import string
+from haystack.utils import print_documents, convert_files_to_docs
 answer = ''
 text = ''
 context = ''
@@ -71,6 +79,9 @@ caption = "RE-SEARCH. GIT Answers."
 sidebarimage = "githubleaks.jpeg"
 loggedin = ''
 loginresult = ''
+train_file = None
+df = ''
+prompt = ''
 st.set_page_config(layout="wide")
 
 def local_css(file_name):
@@ -379,6 +390,133 @@ def cache_on_button_press(label, **cache_kwargs):
         return wrapped_func
     return function_decorator
 
+def process_text_input(text: str, run_id: str = None):  
+	text = StringIO(text).read()  
+	chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]  
+	df = pd.DataFrame.from_dict({'text': chunks})  
+	return df
+
+def process_csv_file(train_file):  
+	df = pd.read_csv(train_file, encoding='utf-8') 
+	return df
+
+def embed(list_of_texts):  
+	response = co.embed(model='small', texts=list_of_texts)  
+	return response.embeddings
+
+def top_n_neighbors_indices(prompt_embedding: np.ndarray, storage_embeddings: np.ndarray, n: int = 5):  
+	if isinstance(storage_embeddings, list):  
+		storage_embeddings = np.array(storage_embeddings)  
+	if isinstance(prompt_embedding, list):  
+		storage_embeddings = np.array(prompt_embedding)  
+	similarity_matrix = prompt_embedding @ storage_embeddings.T / np.outer(norm(prompt_embedding, axis=-1), norm(storage_embeddings, axis=-1))  
+	num_neighbors = min(similarity_matrix.shape[1], n)  
+	indices = np.argsort(similarity_matrix, axis=-1)[:, -num_neighbors:]  
+	return indices
+
+def chunk_text(df, width=1500, overlap=500):
+    # create an empty dataframe to store the chunked text
+    new_df = pd.DataFrame(columns=['id', 'text_chunk'])
+
+    # iterate over each row in the original dataframe
+    for index, row in df.iterrows():
+        # split the text into chunks of size 'width', with overlap of 'overlap'
+        chunks = []
+        rows = []
+        for i in range(0, len(row['Text']), width - overlap):
+            chunk = row['Text'][i:i+width]
+            chunks.append(chunk)
+
+        # iterate over each chunk and add it to the new dataframe
+        chunk_rows = []
+        for i, chunk in enumerate(chunks):
+            # calculate the start index based on the chunk index and overlap
+            start_index = i * (width - overlap)
+
+            # create a new row with the chunked text and the original row's ID
+            new_row = {'id': row['id'], 'text_chunk': chunk, 'start_index': start_index}
+            chunk_rows.append(new_row)
+        chunk_df = pd.DataFrame(chunk_rows)
+        new_df = pd.concat([new_df, chunk_df], ignore_index=True)
+    return new_df
+def search(query, n_results, df, search_index, co):
+    # Get the query's embedding
+    query_embed = co.embed(texts=[query],
+                    model="readmes",
+                    truncate="LEFT").embeddings
+    
+    # Get the nearest neighbors and similarity score for the query and the embeddings, 
+    # append it to the dataframe
+    nearest_neighbors = search_index.get_nns_by_vector(
+        query_embed[0], 
+        n_results, 
+        include_distances=True)
+    # filter the dataframe to include the nearest neighbors using the index
+    df = df[df.index.isin(nearest_neighbors[0])]
+    index_similarity_df = pd.DataFrame({'similarity':nearest_neighbors[1]}, index=nearest_neighbors[0])
+    df = df.join(index_similarity_df,) # Match similarities based on indexes
+    df = df.sort_values(by='similarity', ascending=False)
+    return df
+
+
+# define a function to generate an answer
+def gen_answer(q, para): 
+    response = co.generate( 
+        model='command-xlarge-20221108', 
+        prompt=f'''Paragraph:{para}\n\n
+                Answer the question using this paragraph.\n\n
+                Question: {q}\nAnswer:''', 
+        max_tokens=100, 
+        temperature=0.4)
+    return response.generations[0].text
+
+def gen_better_answer(ques, ans): 
+    response = co.generate( 
+        model='command-xlarge-20221108', 
+        prompt=f'''Answers:{ans}\n\n
+                Question: {ques}\n\n
+                Generate a new answer that uses the best answers 
+                and makes reference to the question.''', 
+        max_tokens=100, 
+        temperature=0.4)
+    return response.generations[0].text
+
+def display(query, results):
+    # 1. Run co.generate functions to generate answers
+
+    # for each row in the dataframe, generate an answer concurrently
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        results['answer'] = list(executor.map(gen_answer, 
+                                              [query]*len(results), 
+                                              results['text_chunk']))
+    answers = results['answer'].tolist()
+    # run the function to generate a better answer
+    answ = gen_better_answer(query, answers)
+    
+    # 2. Code to display the resuls in a user-friendly format
+
+    st.subheader(query)
+    st.write(answ)
+    # add a spacer
+    st.write('')
+    st.write('')
+    st.subheader("Relevant documents")
+    # display the results
+    for i, row in results.iterrows():
+        # display the 'Category' outlined
+        st.markdown(f'**{row["Type"]}**')
+        st.markdown(f'**{row["Category"]}**')
+        st.markdown(f'{row["title"]}')
+        # display the url as a hyperlink
+        # add a button to open the url in a new tab
+        st.markdown(f'[{row["link"]}]({row["link"]})')
+        st.write(row['answer'])
+        # collapse the text
+        with st.expander('Read more'):
+            st.write(row['text'])
+        st.write('')
+
+
 
 
 local_css("gitAnswers.css")
@@ -409,7 +547,7 @@ password = st.sidebar.text_input('password', type='password')
 
 #state.logintogitlit = st.sidebar.button("LOGIN")
 # DB Management
-conn = sqlite3.connect('streamuser.db')
+conn = sqlite3.connect('streamuser.db', check_same_thread=False)
 c = conn.cursor()
 # DB  Functions
 # @fancy_cache(unique_to_session=True)
@@ -459,24 +597,121 @@ if authenticate(username, password, loggedin):
     st.image(image, caption=None, width=None, use_column_width=True,
                 clamp=False, channels='RGB', output_format='auto')
     st.write("# GitAnswers Q/A Demo - Readmes and Docs from Repos")
+    st.write('*******************************')
+    st.header('COHEREnt Summarization')     
+    st.write('*******************************')
+    question = st.text_input("Summarize THIS (Enter Text Here):", value=st.session_state.question, max_chars=100000, on_change=reset_results)
+    summary_pressed = st.button("Summarize IT!")
+    st.write('*******************************')
+    st.header('Upload or Copy/Paste Files here for Search or Summarization:')
+    st.write('*******************************')
+    option = st.selectbox("Document Input:", ["TEXT BOX", "CSV", "READMES FRON GitAnswers Downloads"])  
+    if option == "CSV":  
+        train_file = st.file_uploader("Upload A Custom Training CSV File TO Make it more COHEREnt", help="Accepts a two column csv", type=["csv"])  
+        embeddings = None  
+    if train_file is not None:  
+            df, _, _, _ = process_csv_file(train_file)  
+    if option == "TEXT BOX":  
+        text = st.text_area("Paste a Document HERE")  
+        if text != "":  
+            df = process_text_input(text)
+    if option == "READMES FRON GitAnswers Downloads":      
+        doc_dir = "./newreadmes/"
+        txtfiles = []		
+#print(glob.glob("/Users/neal.trieber/Downloads/Promed2012_2014"))
+        with open('data_to_import.csv', 'w') as out_file:
+            writer = csv.writer(out_file)
+            Colheader = ['Text']
+            writer.writerow(Colheader)
+            out_file.close()
+              
+        for file in glob.glob(doc_dir + "*.txt"):
+            txtfiles.append(file)
+            print (file)
+            with open(file, 'r') as in_file:
+                stripped = (line.strip() for line in in_file)
+                result = " ".join(line.strip() for line in in_file)
+                print (result)
+                lines = (line.split(",") for line in stripped if line)
+                # print (lines[1] + ', ' + lines[2])
+                with open('data_to_import.csv', 'a') as myout_file:
+                    writer = csv.writer(myout_file)
+                    if result is not "":
+                        writer.writerow([result])
+                    print ('FILE INGESTED!')
+                    myout_file.close()
+        # dicts = convert_files_to_docs(dir_path=doc_dir)
+        # print(dicts[:3])
+        df = pd.read_csv('data_to_import.csv')
+        print (df)
+        # add an id column
+        df['id'] = df.index
+        new_df = chunk_text(df)
+        # append text chunks to the original dataframe in id order
+        df = df.merge(new_df, on='id', how='left')
+        # df
+        # Get the embeddings
+        embeds = co.embed(texts=list(df['text_chunk']),
+                        model="large",
+                        truncate="RIGHT").embeddings
+        # Check the dimensions of the embeddings
+        embeds = np.array(embeds)
+        embeds.shape
+        # Create the search index, pass the size of embedding
+        search_index = AnnoyIndex(embeds.shape[1], 'angular')
+        # Add all the vectors to the search index
+        for i in range(len(embeds)):
+            search_index.add_item(i, embeds[i])
 
-    # Search bar
-    question = st.text_input("Ask A Question", value=st.session_state.question, max_chars=1000, on_change=reset_results)
+        search_index.build(10) # 10 trees
+        search_index.save('search_index.ann')
+        # export the dataframe to a csv file
+        df.to_csv('cohere_text_import.csv', index=False)
+        
+        # Load the search index
+        search_index = AnnoyIndex(f=4096, metric='angular')
+        search_index.load('search_index.ann')
 
-    run_pressed = st.button("Run")
+        # load the csv file called cohere_final.csv
+        df = pd.read_csv('cohere_text_import.csv')
 
-    run_query = (
-        run_pressed or question != st.session_state.question
+
+
+    if question:
+        cohere_response = co.summarize( 
+            text=question,
+            length='auto',
+            format='auto',
+            model='summarize-xlarge',
+            additional_command='',
+            temperature=0.9,
+            )
+        
+    # if df is not NotImplemented:
+    #     cohere_response = co.summarize( 
+    #         text=question,
+    #         length='auto',
+    #         format='auto',
+    #         model='summarize-xlarge',
+    #         additional_command='',
+    #         temperature=0.9,
+    #         )    
+
+
+    
+    run_summary = (
+        summary_pressed or question != st.session_state.question
     )
 
 
-    # Get results for query
-    if run_query and question:
+    # # Search bar
+    
+    if run_summary and question:
         reset_results()
         st.session_state.question = question
-        with st.spinner("🔎 &nbsp;&nbsp; Running your pipeline"):
+        with st.spinner("🔎 &nbsp;&nbsp; Reading Your Document...Summarization in Progress"):
             try:
-                st.session_state.results = askquestion(question)
+                st.session_state.results = cohere_response.summary            
             except JSONDecodeError as je:
                 st.error(
                     "👓 &nbsp;&nbsp; JSON DECODER had An error occurred reading the results. Is the document store working?"
@@ -488,9 +723,191 @@ if authenticate(username, password, loggedin):
                 
 
     if st.session_state.results:
+        st.write('## Here\'s what I read about:')
+        st.write('*******************************')
+        summary = st.session_state.results
+        # count = range(len(answers))
+        print ("HAZZAH IT WORKED! " + str(summary))
+            # for x, y in ananswer.items():
+            #     #print(key, '->', value)
+            
+            #     # print (answerparts[j])
+            #     if (x == "answer"):
+            #         text = y
+            #     if (x == "context"):
+            #         context = y
+                    
+                # start_idx = context.find(text)
+                # end_idx = start_idx + len(text)
+                # print ("***********************************")
+                # print (str(context.find(text)))
+                # print (context[:start_idx])
+                # print (context[end_idx:])
+                # print (text)
+                # print ("***********************************")
+                # st.write ("*****************************")
+        st.markdown(str(annotation(body=text, label="SUMMARY", background="#964448", color='#ffffff')) + summary, unsafe_allow_html=True)
+        st.write ("*****************************")           
+        # st.write(
+        #     markdown.markdown(str(annotation(body=text, label="SUMMARY", background="#964448", color='#ffffff')) + summary),
+        #     unsafe_allow_html=True,
+        # )
+                #     # else:
+                #     #     st.info("🤔 &nbsp;&nbsp; Haystack is unsure whether any of the documents contain an answer to your question. Try to reformulate it!")
+
+
+    if run_summary and df is not None:
+        reset_results()
+        st.session_state.question = question
+        with st.spinner("🔎 &nbsp;&nbsp; Reading Your Document...Summarization in Progress"):
+            try:
+                st.session_state.results = cohere_response.summary            
+            except JSONDecodeError as je:
+                st.error(
+                    "👓 &nbsp;&nbsp; JSON DECODER had An error occurred reading the results. Is the document store working?"
+                )    
+            except Exception as e:
+                logging.exception(e)
+                st.error("🐞 &nbsp;&nbsp; A general error occurred during the request.")
+            
+                
+
+    if st.session_state.results:
+        st.write('## Here\'s what I read about:')
+        st.write('*******************************')
+        summary = st.session_state.results
+        # count = range(len(answers))
+        print ("HAZZAH IT WORKED! " + str(summary))
+            # for x, y in ananswer.items():
+            #     #print(key, '->', value)
+            
+            #     # print (answerparts[j])
+            #     if (x == "answer"):
+            #         text = y
+            #     if (x == "context"):
+            #         context = y
+                    
+                # start_idx = context.find(text)
+                # end_idx = start_idx + len(text)
+                # print ("***********************************")
+                # print (str(context.find(text)))
+                # print (context[:start_idx])
+                # print (context[end_idx:])
+                # print (text)
+                # print ("***********************************")
+                # st.write ("*****************************")
+        st.markdown(str(annotation(body=text, label="SUMMARY", background="#964448", color='#ffffff')) + summary, unsafe_allow_html=True)
+        st.write ("*****************************")           
+        # st.write(
+        #     markdown.markdown(str(annotation(body=text, label="SUMMARY", background="#964448", color='#ffffff')) + summary),
+        #     unsafe_allow_html=True,
+        # )
+                #     # else:
+                #     #     st.info("🤔 &nbsp;&nbsp; Haystack is unsure whether any of the documents contain an answer to your question. Try to reformulate it!")
+
+
+    
+    
+    # Get results for query
+
+    st.write ("*****************************")              
+    st.header('COHEREnt Prompt - \'GitAnswersGPT\'')
+    st.write ("*****************************")
+
+    if 'question3' not in st.session_state:
+        st.session_state['question3'] = ''
+    if 'results3' not in st.session_state:
+        st.session_state['results3'] = ''
+            
+    question3 = st.text_input("Ask Me Anything:", value=st.session_state.question3, max_chars=100000, on_change=reset_results)
+    print (question3)
+    if question3:
+        cohere_promptresponse = co.generate(
+        model='command',
+        prompt=question3,
+        max_tokens=3000,
+        temperature=0.9,
+        k=0,
+        stop_sequences=[],
+        return_likelihoods='NONE')
+        
+    prompt_pressed = st.button("Ask me Anything!")
+    
+    run_prompt = (
+        prompt_pressed or question3 != st.session_state.question3
+    )
+
+
+    # # Search bar
+    
+    if prompt_pressed and question3:
+        reset_results()
+        st.session_state.question3 = question3
+        with st.spinner("🔎 &nbsp;&nbsp; Let me thing about thought for a sec..."):
+            try:
+                st.session_state.results3 = cohere_promptresponse.generations[0].text            
+            except JSONDecodeError as je:
+                st.error(
+                    "👓 &nbsp;&nbsp; JSON DECODER had An error occurred reading the results. Is the document store working?"
+                )    
+            except Exception as e:
+                logging.exception(e)
+                st.error("🐞 &nbsp;&nbsp; A general error occurred during the request.")
+            
+                
+
+    if st.session_state.results3:
+        reset_results()
+        print('Prediction: {}'.format(cohere_promptresponse.generations[0].text))              
+        prompt = 'Prediction: {}'.format(cohere_promptresponse.generations[0].text)
+        st.write('## Here\'s What I think:')
+        st.write('*******************************')
+        st.markdown(str(annotation(body=text, label="Possibilities", background="#964448", color='#ffffff')) + prompt, unsafe_allow_html=True)
+        st.write ("*****************************")           
+        # st.write(
+        #     markdown.markdown(str(annotation(body=text, label="Possibilites", background="#964448", color='#ffffff')) + prompt),
+        #     unsafe_allow_html=True,
+        #     )
+    
+    if 'question2' not in st.session_state:
+        st.session_state['question2'] = ''
+    if 'results2' not in st.session_state:
+        st.session_state['results2'] = ''
+    question2 = st.text_input("Ask A Question About your Github Readmes", value=st.session_state.question2, max_chars=1000, on_change=reset_results)
+    # if 'question2' not in st.session_state:
+    #     st.session_state['question2'] = 'question2'
+            
+    run_pressed = st.button("Submit Question")
+
+    run_query = (
+        run_pressed or (question2 != st.session_state.question2)
+    )
+
+
+    if question2:
+        results = search(question2, 3, df, search_index, co)
+        display(question2, results)
+
+    if run_query and question2:
+        reset_results()
+        st.session_state.question2 = question2
+        with st.spinner("🔎 &nbsp;&nbsp; Running your pipeline"):
+            try:
+                st.session_state.results2 = askquestion(question2)        
+            except JSONDecodeError as je:
+                st.error(
+                    "👓 &nbsp;&nbsp; JSON DECODER had An error occurred reading the results. Is the document store working?"
+                )    
+            except Exception as e:
+                logging.exception(e)
+                st.error("🐞 &nbsp;&nbsp; A general error occurred during the request.")
+            
+    
+
+    if st.session_state.results2:
         st.write('## We have The Answers for You:')
         st.write('*******************************')
-        answers = st.session_state.results
+        answers = st.session_state.results2
         # count = range(len(answers))
         for i in range(len(answers)):
             ananswer = (answers[i])
@@ -523,3 +940,21 @@ if authenticate(username, password, loggedin):
                 )
                 #     # else:
                 #     #     st.info("🤔 &nbsp;&nbsp; Haystack is unsure whether any of the documents contain an answer to your question. Try to reformulate it!")
+
+
+    if df is not None and prompt != "":
+        base_prompt = "Based on the Documents Provided, answer the following question:"
+        prompt_embedding = embed_stuff([prompt])
+        aug_prompts = get_augmented_prompts(np.array(prompt_embedding), embeddings, df)
+        new_prompt = '\n'.join(aug_prompts) + '\n\n' + base_prompt + '\n' + prompt + '\n'
+        print(new_prompt)
+        is_success = False
+        while not is_success:
+            try:
+                response = generate(new_prompt)
+                is_success = True
+            except Exception:
+                aug_prompts = aug_prompts[:-1]
+                new_prompt = '\n'.join(aug_prompts) + '\n' + base_prompt + '\n' + prompt  + '\n'
+
+        st.write(response.generations[0].text)

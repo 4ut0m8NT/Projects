@@ -1,0 +1,1 @@
+{"faiss_index_factory_str": "Flat", "embedding_dim": 384, "index": "pica8docs3a", "similarity": "cosine", "embedding_field": "question_emb", "sql_url": "sqlite:///faiss_document_store.db"}
