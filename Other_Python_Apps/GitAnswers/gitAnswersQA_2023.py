@@ -442,7 +442,7 @@ def chunk_text(df, width=1500, overlap=500):
 def search(query, n_results, df, search_index, co):
     # Get the query's embedding
     query_embed = co.embed(texts=[query],
-                    model="readmes",
+                    model="f4977328-3655-413c-82ef-3520da58852f-ft",
                     truncate="LEFT").embeddings
     
     # Get the nearest neighbors and similarity score for the query and the embeddings, 
