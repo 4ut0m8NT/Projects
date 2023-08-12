@@ -4,7 +4,10 @@
 * Use userstream.py to add users to the streamuser.db sqlite db for authentication to the app
 * requirements.txt provided for python auto package install
 * pip install -r ./requirements.txt
-* Requires Python3 :)
+* Requirements:
+*           - ACCESS_TOKEN in gitAnswers.py requires your OWN personal Github API key/Access token.
+*           - Python3
+*           - pip install -r ./requirements.txt
 **********************************************
 * Use at your own risk, no implied warranties or guarantees of any kind.
 *********************************************
