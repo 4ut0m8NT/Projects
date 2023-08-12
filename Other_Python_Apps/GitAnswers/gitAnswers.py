@@ -182,7 +182,7 @@ loggedin = ''
 loginresult = ''
 repolastupdated = ''
 
-ACCESS_TOKEN = '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'
+ACCESS_TOKEN = ''
 
 g = Github(ACCESS_TOKEN)
 
